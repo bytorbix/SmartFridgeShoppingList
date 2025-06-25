@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>רשימת קניות חכמה</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Floating Category Button -->
+        <button class="floating-nav-btn" id="floatingNavBtn">
+            <div class="nav-icon">
+                <i class="fas fa-th-large"></i>
+            </div>
+            <span class="nav-text">קטגוריות</span>
+        </button>
+
+        <!-- Categories Overlay -->
+        <div class="categories-overlay" id="categoriesOverlay">
+            <div class="categories-sidebar" id="categoriesSidebar">
+                <div class="sidebar-header">
+                    <h3>
+                        <i class="fas fa-tags"></i>
+                        קטגוריות הקניות
+                    </h3>
+                    <button class="sidebar-close" id="sidebarClose">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+
+                <div class="categories-list" id="categoriesList">
+                    <div class="category-item active" data-category="all">
+                        <i class="fas fa-list"></i>
+                        <span>כל הפריטים</span>
+                        <span class="count" id="totalCount">0</span>
+                    </div>
+                    <!-- Categories will be loaded here -->
+                </div>
+
+                <div class="sidebar-footer">
+                    <button class="stats-btn" id="statsBtn">
+                        <i class="fas fa-chart-pie"></i>
+                        סטטיסטיקות
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="container">
+                <!-- Header -->
+                <header class="header">
+                    <div class="header-content">
+                        <h1 class="app-title">
+                            <i class="fas fa-shopping-cart"></i>
+                            רשימת קניות חכמה
+                        </h1>
+                        <div class="header-info">
+                            <div class="current-category" id="currentCategory">
+                                <i class="fas fa-tag"></i>
+                                <span>כל הפריטים</span>
+                            </div>
+                            <div class="sync-status" id="syncStatus">
+                                <i class="fas fa-sync-alt"></i>
+                                <span>מסונכרן</span>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Voice Input Section -->
+                <section class="voice-section">
+                    <button class="voice-button" id="voiceButton">
+                        <div class="voice-icon">
+                            <i class="fas fa-microphone"></i>
+                        </div>
+                        <div class="voice-text">
+                            <span class="voice-label" id="voiceLabel">לחץ כדי לדבר</span>
+                            <span class="voice-hint">הוסף פריטים בקול עם קטגוריזציה אוטומטית</span>
+                        </div>
+                    </button>
+                    <div class="voice-feedback" id="voiceFeedback">
+                        <div class="pulse-animation"></div>
+                        <span>מקליט...</span>
+                    </div>
+                </section>
+
+                <!-- Shopping List -->
+                <section class="shopping-list-section">
+                    <div class="list-header">
+                        <h2 id="listTitle">רשימת הקניות שלי</h2>
+                        <div class="list-actions">
+                            <button class="filter-toggle" id="filterToggle">
+                                <i class="fas fa-filter"></i>
+                                סינון
+                            </button>
+                            <button class="clear-all-btn" id="clearAllBtn">
+                                <i class="fas fa-trash"></i>
+                                נקה הכל
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="filter-bar" id="filterBar">
+                        <div class="filter-options">
+                            <button class="filter-btn active" data-filter="all">כל הפריטים</button>
+                            <button class="filter-btn" data-filter="pending">ממתינים</button>
+                            <button class="filter-btn" data-filter="completed">הושלמו</button>
+                        </div>
+                    </div>
+
+                    <div class="shopping-list" id="shoppingList">
+                        <!-- Items will be loaded here -->
+                    </div>
+
+                    <div class="empty-state" id="emptyState">
+                        <i class="fas fa-shopping-basket"></i>
+                        <h3>הרשימה ריקה</h3>
+                        <p>הוסף פריטים באמצעות הקול או לחץ על "הוסף פריט"</p>
+                    </div>
+                </section>
+
+                <!-- Manual Add Section -->
+                <section class="add-section">
+                    <button class="add-button" id="addButton">
+                        <i class="fas fa-plus"></i>
+                        הוסף פריט
+                    </button>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Add Item Modal -->
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>הוסף פריט חדש</h3>
+                <button class="close-btn" id="closeModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="itemName">שם הפריט</label>
+                    <input type="text" id="itemName" placeholder="לדוגמה: חלב, לחם, בננות">
+                </div>
+                <div class="input-group">
+                    <label for="itemQuantity">כמות</label>
+                    <input type="text" id="itemQuantity" placeholder="1" value="1">
+                </div>
+                <div class="input-group">
+                    <label for="itemCategory">קטגוריה</label>
+                    <select id="itemCategory">
+                        <option value="אחר">אחר</option>
+                        <!-- Categories will be loaded here -->
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button class="cancel-btn" id="cancelBtn">ביטול</button>
+                    <button class="save-btn" id="saveBtn">הוסף לרשימה</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Modal -->
+    <div class="modal" id="statsModal">
+        <div class="modal-content stats-modal">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-chart-pie"></i>
+                    סטטיסטיקות רשימת הקניות
+                </h3>
+                <button class="close-btn" id="closeStatsModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="stats-content" id="statsContent">
+                    <!-- Statistics will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <span>מעדכן רשימה...</span>
+    </div>
+
+    <script src="/static/scripts.js"></script>
+</body>
+</html>
