@@ -9,4 +9,13 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+      - ./static2:/app/static2          # For shopping list data and audio
+      - ./ssl_certs:/app/ssl_certs      # Persist SSL certificates
+      - ./static:/app/static            # Static web files
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('https://localhost:8000/health', verify=False)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

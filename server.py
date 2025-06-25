@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel
 import json
 import os
@@ -11,6 +13,14 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 import logging
+import ssl
+import socket
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from ipaddress import ip_address
+import datetime
 
 # Voice processing imports
 import edge_tts
@@ -28,6 +38,124 @@ logger = logging.getLogger(__name__)
 client = OpenAI()
 
 app = FastAPI(title="Smart Shopping List API with Voice")
+
+# SSL Certificate paths
+SSL_DIR = "ssl_certs"
+CERT_FILE = os.path.join(SSL_DIR, "cert.pem")
+KEY_FILE = os.path.join(SSL_DIR, "key.pem")
+
+
+def get_local_ip():
+    """Get the local IP address"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
+
+
+def generate_ssl_certificate():
+    """Generate self-signed SSL certificate using Python cryptography library"""
+    os.makedirs(SSL_DIR, exist_ok=True)
+
+    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+        logger.info("SSL certificates already exist")
+        return True
+
+    try:
+        local_ip = get_local_ip()
+        logger.info(f"Generating SSL certificate for local IP: {local_ip}")
+
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Create certificate subject
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IL"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Local"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "Local"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Smart Shopping List"),
+            x509.NameAttribute(NameOID.COMMON_NAME, local_ip),
+        ])
+
+        # Create certificate
+        cert = x509.CertificateBuilder().subject_name(
+            subject
+        ).issuer_name(
+            issuer
+        ).public_key(
+            private_key.public_key()
+        ).serial_number(
+            x509.random_serial_number()
+        ).not_valid_before(
+            datetime.datetime.utcnow()
+        ).not_valid_after(
+            # Certificate valid for 1 year
+            datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        ).add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.DNSName("*.local"),
+                x509.IPAddress(ip_address("127.0.0.1")),
+                x509.IPAddress(ip_address(local_ip)),
+            ]),
+            critical=False,
+        ).add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=True,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        ).add_extension(
+            x509.ExtendedKeyUsage([
+                x509.oid.ExtendedKeyUsageOID.SERVER_AUTH,
+            ]),
+            critical=True,
+        ).sign(private_key, hashes.SHA256())
+
+        # Write private key to file
+        with open(KEY_FILE, "wb") as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+
+        # Write certificate to file
+        with open(CERT_FILE, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+        logger.info("SSL certificate generated successfully using Python cryptography")
+        logger.info(f"Certificate: {CERT_FILE}")
+        logger.info(f"Private key: {KEY_FILE}")
+        logger.info(f"Valid for: localhost, *.local, 127.0.0.1, {local_ip}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error generating SSL certificate: {e}")
+        return False
+
+
+def check_ssl_requirements():
+    """Check if SSL certificates exist or can be generated"""
+    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+        return True
+
+    # Try to generate certificates
+    return generate_ssl_certificate()
 
 
 # Data models
@@ -224,6 +352,9 @@ def is_likely_false_positive(transcription: str) -> bool:
         return True
 
     return False
+
+
+def clean_text_for_tts(text: str) -> str:
     """Clean text for TTS by removing markdown and formatting"""
     if not text:
         return text
@@ -253,6 +384,28 @@ def is_likely_false_positive(transcription: str) -> bool:
     text = text.replace('—', '-')
 
     return text.strip()
+
+
+# ============================================================================
+# SECURITY MIDDLEWARE
+# ============================================================================
+
+@app.middleware("http")
+async def security_headers_middleware(request, call_next):
+    """Add basic security headers"""
+    response = await call_next(request)
+
+    # Basic security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+    # For HTTPS only (will be ignored on HTTP)
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
 
 
 # ============================================================================
@@ -523,67 +676,6 @@ async def fallback_command_processing(command: str) -> str:
         return "לא הבנתי את הפקודה. תוכל לומר 'הוסף' ושם הפריט, או 'תראה לי את הרשימה'"
 
 
-def clean_text_for_tts(text: str) -> str:
-    """Clean text for TTS by removing markdown and formatting"""
-    if not text:
-        return text
-
-    # Remove markdown formatting
-    text = text.replace('**', '')  # Bold
-    text = text.replace('*', '')  # Italics/emphasis
-    text = text.replace('__', '')  # Underline
-    text = text.replace('_', '')  # Underline single
-    text = text.replace('```', '')  # Code blocks
-    text = text.replace('`', '')  # Inline code
-    text = text.replace('#', '')  # Headers
-    text = text.replace('>', '')  # Blockquotes
-    text = text.replace('[', '')  # Link brackets
-    text = text.replace(']', '')  # Link brackets
-    text = text.replace('(', '')  # Link parentheses
-    text = text.replace(')', '')  # Link parentheses
-
-    # Remove excessive whitespace
-    text = ' '.join(text.split())
-
-    # Remove bullet points and special characters that sound bad in TTS
-    text = text.replace('•', '')
-    text = text.replace('○', '')
-    text = text.replace('◦', '')
-    text = text.replace('–', '-')
-    text = text.replace('—', '-')
-
-    return text.strip()
-    """Simple item categorization"""
-    item_lower = item_name.lower()
-
-    # Dairy products
-    if any(word in item_lower for word in ["חלב", "גבינה", "יוגורט", "קוטج", "חמאה", "שמנת"]):
-        return "חלב ומוצרי חלב"
-
-    # Fruits
-    elif any(word in item_lower for word in ["בננה", "תפוח", "תפוז", "ענב", "תות", "מלון", "אבטיח", "מנגו"]):
-        return "פירות"
-
-    # Vegetables
-    elif any(word in item_lower for word in ["עגבני", "מלפפון", "חסה", "גזר", "בצל", "פלפל", "ברוקולי"]):
-        return "ירקות"
-
-    # Bread and bakery
-    elif any(word in item_lower for word in ["לחם", "פיתה", "בגט", "חלה", "עוגה"]):
-        return "לחם ומאפים"
-
-    # Beverages
-    elif any(word in item_lower for word in ["מים", "מיץ", "קולה", "בירה", "יין", "קפה", "תה"]):
-        return "משקאות"
-
-    # Meat and fish
-    elif any(word in item_lower for word in ["בשר", "עוף", "דג", "נקניק", "קציצ", "טונה"]):
-        return "בשר ודגים"
-
-    else:
-        return "אחר"
-
-
 # ============================================================================
 # EXISTING SHOPPING LIST ENDPOINTS
 # ============================================================================
@@ -799,13 +891,19 @@ async def clear_list():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# Add CORS middleware for development
+# Add CORS middleware for development (restrict in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://localhost:8000", "https://127.0.0.1:8000"],  # Restrict to HTTPS
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Add trusted host middleware for basic protection
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["localhost", "127.0.0.1", "*.local", get_local_ip()]
 )
 
 if __name__ == "__main__":
@@ -824,10 +922,37 @@ if __name__ == "__main__":
         logger.warning(f"Missing static files: {missing_files}")
         logger.info("Server will start but some features may not work properly")
 
-    logger.info("Starting Smart Shopping List Server with Voice Support...")
-    logger.info("Voice endpoints available:")
-    logger.info("  POST /api/transcribe - Convert audio to text")
-    logger.info("  POST /api/text-to-speech - Convert text to audio")
-    logger.info("  POST /api/voice-command - Full voice command processing")
+    # Check SSL requirements
+    use_ssl = check_ssl_requirements()
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    if use_ssl:
+        logger.info("Starting Smart Shopping List Server with HTTPS support...")
+        logger.info(f"Server will be available at:")
+        logger.info(f"  https://localhost:8000")
+        logger.info(f"  https://{get_local_ip()}:8000")
+        logger.info("Voice endpoints available:")
+        logger.info("  POST /api/transcribe - Convert audio to text")
+        logger.info("  POST /api/text-to-speech - Convert text to audio")
+        logger.info("  POST /api/voice-command - Full voice command processing")
+        logger.warning("Using self-signed certificate - browsers will show security warning")
+        logger.info("To trust the certificate, add it to your browser or accept the security warning")
+
+        # Run with SSL
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            ssl_keyfile=KEY_FILE,
+            ssl_certfile=CERT_FILE,
+            ssl_version=ssl.PROTOCOL_TLSv1_2
+        )
+    else:
+        logger.warning("SSL certificates could not be generated - falling back to HTTP")
+        logger.warning("Install OpenSSL to enable HTTPS support")
+        logger.info("Starting Smart Shopping List Server with HTTP...")
+        logger.info(f"Server will be available at:")
+        logger.info(f"  http://localhost:8000")
+        logger.info(f"  http://{get_local_ip()}:8000")
+
+        # Run without SSL
+        uvicorn.run(app, host="0.0.0.0", port=8000)

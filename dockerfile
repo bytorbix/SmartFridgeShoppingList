@@ -14,9 +14,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app code
 COPY . .
 
-# Create uploads directory
-RUN mkdir -p uploads
+# Create necessary directories
+RUN mkdir -p uploads ssl_certs static static2/audio data
+
+# Set permissions for SSL certificate generation
+RUN chmod 755 ssl_certs
 
 EXPOSE 8000
 
+# Use HTTPS by default, but allow HTTP fallback
 CMD ["python", "server.py"]
