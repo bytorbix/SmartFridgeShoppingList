@@ -1,0 +1,7 @@
+uvicorn~=0.34.3
+fastapi~=0.115.13
+pydantic~=2.11.7
+openai~=1.91.0
+dotenv~=0.9.9
+python-dotenv~=1.1.1
+agno~=1.6.4
